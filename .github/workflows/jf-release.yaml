@@ -1,0 +1,119 @@
+name: "Release Pipeline"
+on:
+  workflow_dispatch:
+    inputs:
+      rt_npm_remote_repo_id:
+        required: true
+        type: string
+        default: "juiceshop-npm-remote"
+        description: "Artifactory Repository Name"
+      rt_npm_curation_remote_repo_id:
+        required: true
+        type: string
+        default: "juiceshop-npm-curated-dev-remote"
+        description: "NPM Curation Repository Name"
+      rt_docker_repo:
+        required: true
+        type: string
+        default: "kryptostream-docker-dev-local"
+        description: "Artifactory Docker repository"
+permissions:
+  actions: read           # for detecting the Github Actions environment
+  id-token: write         # for creating OIDC tokens for signing
+  packages: write         # for uploading attestations
+  contents: read          # read the contents permission
+  security-events: write  # for uploading code scanning
+env:
+  CYCLONEDX_NPM_VERSION: '^2.0.0||^3.0.0'
+jobs:
+  package:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        node-version: [20]
+      fail-fast: false
+    steps:
+      - name: "Check out Git repository"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
+      - name: "Use Node.js ${{ matrix.node-version }}"
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af #v4.1.0
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Setup JFrog CLI 
+        uses: jfrog/setup-jfrog-cli@v4
+        id: setup-cli
+        env:
+          JF_URL: https://${{ vars.JF_URL }}/
+          JF_PROJECT: ${{ vars.JF_PROJECT }}
+        with:
+            oidc-provider-name: ptfl-github
+            oidc-audience: ptfl-aud
+            
+      - name: "Install CLI tools"
+        run: |
+          npm install -g @cyclonedx/cyclonedx-npm@$CYCLONEDX_NPM_VERSION
+          npm install -g grunt-cli
+          
+      - name: "Set packaging options for Grunt"
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+          echo "PCKG_OS_NAME=win32" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+          echo "PCKG_OS_NAME=darwin" >> $GITHUB_ENV
+          else
+          echo "PCKG_OS_NAME=linux" >> $GITHUB_ENV
+          fi
+          echo "PCKG_CPU_ARCH=x64" >> $GITHUB_ENV
+          echo "PCKG_NODE_VERSION=${{ matrix.node-version }}" >> $GITHUB_ENV
+        shell: bash
+      - name: "Package application"
+        run: |
+          jf npmc --repo-resolve ${{ github.event.inputs.rt_npm_curation_remote_repo_id }}
+          jf npm install --production --repo-resolve ${{ github.event.inputs.rt_npm_curation_remote_repo_id }}
+          npm run package:ci
+      - name: 'Attach packaged archive to tag release'
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 #v2.2.2
+        with:
+          draft: true
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check out Git repository"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
+      - name: "Set up QEMU"
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf #v3.2.0
+      - name: "Set up Docker Buildx"
+        uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 #v3.8.0
+        
+      - name: "Login to DockerHub"
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.JF_URL }}
+          username: ${{ steps.setup-cli.outputs.oidc-user }}
+          password: ${{ steps.setup-cli.outputs.oidc-token }}
+      - name: "Get tag name"
+        id: tag
+        uses: dawidd6/action-get-tag@727a6f0a561be04e09013531e73a3983a65e3479 #v1.1.0 TODO Action is archived and should be replaced eventually
+      - name: "Set labels for ${{ github.ref }}"
+        run: |
+          echo "VCS_REF=`git rev-parse --short HEAD`" >> $GITHUB_ENV
+          echo "BUILD_DATE=`date -u +”%Y-%m-%dT%H:%M:%SZ”`" >> $GITHUB_ENV
+      
+      - name: "Build and push for AMD64 and ARM64 processors"
+        uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355
+        id: build
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ vars.JF_URL }}/${{ env.DOCKER_REPO }}/${{ env.IMAGE_NAME }}:${{ github.run_number }}
+          provenance: false
+          build-args: |
+            VCS_REF=${{ env.VCS_REF }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            CYCLONEDX_NPM_VERSION=${{ env.CYCLONEDX_NPM_VERSION }}
