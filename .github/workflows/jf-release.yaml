@@ -1,4 +1,4 @@
-name: "Release Pipeline"
+name: "Release Pipeline with JFrog platfrom"
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +17,16 @@ on:
         type: string
         default: "kryptostream-docker-dev-local"
         description: "Artifactory Docker repository"
+      docker_image_name:
+        required: true
+        type: string
+        default: "juice-shop"
+        description: "Docker Image name" 
+      jfrog_cli_log_level:
+        required: true
+        type: string
+        default: "INFO"
+        description: "Set JFrog CLI Log level"
 permissions:
   actions: read           # for detecting the Github Actions environment
   id-token: write         # for creating OIDC tokens for signing
