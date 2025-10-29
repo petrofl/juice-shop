@@ -40,6 +40,9 @@ permissions:
   security-events: write  # for uploading code scanning
 env:
   CYCLONEDX_NPM_VERSION: '^2.0.0||^3.0.0'
+  DOCKER_REPO: ${{ github.event.inputs.rt_docker_repo }}
+  IMAGE_NAME: ${{ github.event.inputs.docker_image_name }}
+  JFROG_CLI_LOG_LEVEL: ${{ github.event.inputs.cli_log_level }}
 jobs:
   package:
     runs-on: ${{ matrix.os }}
@@ -102,7 +105,7 @@ jobs:
           jf npm publish
           jf rt build-collect-env
           jf rt build-add-git
-          jfrog rt build-publish ${{docker_image_name}}-app ${{ env.TAG_NAME }}
+          jf rt build-publish ${{ env.IMAGE_NAME }}-app ${{ env.TAG_NAME }}
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -112,6 +115,7 @@ jobs:
         uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf #v3.2.0
       - name: "Set up Docker Buildx"
         uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 #v3.8.0
+        
       - name: Setup JFrog CLI 
         uses: jfrog/setup-jfrog-cli@v4
         id: setup-cli
