@@ -12,6 +12,11 @@ on:
         type: string
         default: "juiceshop-npm-curated-dev-remote"
         description: "NPM Curation Repository Name"
+      rt_npm_deploy_repo:
+        required: true
+        type: string
+        default: "juiceshop-npm-dev-local"
+        description: "NPM Curation Repository Name"
       rt_docker_repo:
         required: true
         type: string
@@ -80,7 +85,7 @@ jobs:
       - name: "Package application"
         run: |
           jf npmc --repo-resolve ${{ github.event.inputs.rt_npm_curation_remote_repo_id }}
-          jf npm install --production --repo-resolve ${{ github.event.inputs.rt_npm_curation_remote_repo_id }}
+          jf npm install --production 
           npm run package:ci
       - name: 'Attach packaged archive to tag release'
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 #v2.2.2
@@ -89,6 +94,15 @@ jobs:
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: "Upload to JFrog"
+        id: tag
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          jf npmc --repo-deploy  ${{ github.event.inputs.rt_npm_deploy_repo }}
+          jf npm publish
+          jf rt build-collect-env
+          jf rt build-add-git
+          jfrog rt build-publish ${{docker_image_name}}-app ${{ env.TAG_NAME }}
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -98,6 +112,15 @@ jobs:
         uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf #v3.2.0
       - name: "Set up Docker Buildx"
         uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 #v3.8.0
+      - name: Setup JFrog CLI 
+        uses: jfrog/setup-jfrog-cli@v4
+        id: setup-cli
+        env:
+          JF_URL: https://${{ vars.JF_URL }}/
+          JF_PROJECT: ${{ vars.JF_PROJECT }}
+        with:
+            oidc-provider-name: ptfl-github
+            oidc-audience: ptfl-aud
         
       - name: "Login to DockerHub"
         uses: docker/login-action@v3
